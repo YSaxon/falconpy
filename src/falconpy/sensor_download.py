@@ -36,15 +36,73 @@ OTHER DEALINGS IN THE SOFTWARE.
 
 For more information, please refer to <https://unlicense.org>
 """
+from datetime import datetime
 import os
+from typing_extensions import Literal
+
+from pydantic.main import BaseModel
+from pydantic.tools import parse_obj_as
 from ._util import service_request, parse_id_list, generate_ok_result
 from ._service_class import ServiceClass
 
+class SensorInstaller(BaseModel):
+    name:str
+    description:str
+    platform: Literal['linux','windows','mac']
+    os: Literal['Amazon Linux', 'Debian', 'RHEL/CentOS/Oracle', 'SLES', 'Ubuntu', 'Windows', 'macOS','']
+        #blank values = Falcon SIEM Connector so should probably be filtered out of most results searches
+    os_version: str
+        # macOS {''}
+        # RHEL/CentOS/Oracle {'8', '7', '6'}
+        # Amazon Linux {'1', '2', '2 - arm64'}
+        # Windows {''}
+        # SLES {'15', '11', '12'}
+        # Debian {'9/10', '9'}
+        # Ubuntu {'16/18/20', '14/16/18/20'}
+    sha256: str #these are used as the key for actually downloading
+    release_date: datetime
+    version:str #usually an entry for every valid os,os_version combo for each version
+    file_size:int
+    file_type: Literal['rpm','deb','pkg','exe'] #relevant for auto-unpacking, these are mostly 1:1 with os
+        # '' {'rpm', 'deb'} but those are Falcon SIEM Connector
+        # macOS {'pkg'}
+        # RHEL/CentOS/Oracle {'rpm'}
+        # Amazon Linux {'rpm'}
+        # Windows {'exe'}
+        # SLES {'rpm'}
+        # Debian {'deb'}
+        # Ubuntu {'deb'}
+    
+    def as_query_filter(self):
+        return '+'.join([
+            f"{k}:'{v}'" for k,v in self.__fields__ if k is not None and v is not None
+        ])
+    
+    
 
 class Sensor_Download(ServiceClass):
     """The only requirement to instantiate an instance of this class
        is a valid token provided by the Falcon API SDK OAuth2 class.
     """
+    
+    
+    def _validate(self,response:dict):#this should probably be higher up in class hierarchy anyway
+        # check_for_errors_and_raise_error()
+        # check_for_missing_resources_and_raise_error()
+        return response['body']['resources']
+    
+    
+    #@ friendly(GetCombinedSensorInstallersByQuery,'parameters',List[SensorInstaller])
+    def list_sensor_installers(self: object, sort='release_date|desc',filter='*',offset=0,limit=100) -> list[SensorInstaller]:
+        if limit > 500: raise ValueError('max for limit is 500, you can paginate with offset if neccesary')
+        result=self.GetCombinedSensorInstallersByQuery(dict(sort=sort,filter=filter,offset=offset,limit=limit))
+        resources=self.validate_and_get_resources(result)
+        installers=parse_obj_as(list[SensorInstaller], resources)
+        return installers
+        #these should be decorators!
+
+    
+    
     def GetCombinedSensorInstallersByQuery(self: object, parameters: dict = None) -> dict:
         """
         Retrieve all metadata for installers from provided query
